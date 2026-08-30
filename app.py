@@ -4,6 +4,9 @@ import re
 import json
 import zipfile
 import tempfile
+import base64
+import requests
+from datetime import datetime
 from urllib.parse import quote_plus
 
 import feedparser
@@ -399,6 +402,53 @@ def create_cardnews(analysis):
 
     return image_paths, zip_buffer.getvalue()
 
+def upload_image_to_github(image_path, filename):
+    token = st.secrets["GITHUB_TOKEN"]
+    owner = st.secrets["GITHUB_OWNER"]
+    repo = st.secrets["GITHUB_REPO"]
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
+
+    with open(image_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode("utf-8")
+
+    folder = datetime.now().strftime("%Y%m%d_%H%M%S")
+    github_path = f"published/{folder}/{filename}"
+
+    api_url = (
+        f"https://api.github.com/repos/"
+        f"{owner}/{repo}/contents/{github_path}"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+
+    data = {
+        "message": f"Upload cardnews image: {filename}",
+        "content": content,
+        "branch": branch
+    }
+
+    response = requests.put(
+        api_url,
+        headers=headers,
+        json=data
+    )
+
+    if response.status_code not in [200, 201]:
+        raise Exception(
+            f"GitHub 업로드 실패: {response.status_code} "
+            f"{response.text}"
+        )
+
+    raw_url = (
+        f"https://raw.githubusercontent.com/"
+        f"{owner}/{repo}/{branch}/{github_path}"
+    )
+
+    return raw_url
 
 if "articles" not in st.session_state:
     st.session_state["articles"] = []
