@@ -720,7 +720,55 @@ else:
                         key=f"download_{article_key}"
                     )
 
+                    if st.button(
+                        "GitHub에 카드뉴스 업로드",
+                        key=f"upload_{article_key}"
+                    ):
 
+                        with st.spinner(
+                            "카드뉴스 이미지를 GitHub에 업로드하는 중입니다..."
+                        ):
+
+                            try:
+                                uploaded_urls = []
+
+                                for idx, image_path in enumerate(
+                                    card_data["paths"],
+                                    start=1
+                                ):
+                                    filename = f"slide_{idx}.png"
+
+                                    url = upload_image_to_github(
+                                        image_path,
+                                        filename
+                                    )
+
+                                    uploaded_urls.append(url)
+
+                                st.session_state[
+                                    f"github_urls_{article_key}"
+                                ] = uploaded_urls
+
+                                st.success(
+                                    "GitHub 업로드 완료"
+                                )
+
+                            except Exception as error:
+                                st.error(
+                                    f"GitHub 업로드 오류: {error}"
+                                )
+
+                    github_urls_key = f"github_urls_{article_key}"
+
+                    if github_urls_key in st.session_state:
+                        st.markdown("### GitHub 이미지 URL")
+
+                        for idx, url in enumerate(
+                            st.session_state[github_urls_key],
+                            start=1
+                        ):
+                            st.write(f"{idx}장: {url}")
+                    
                     if approved:
 
                         st.success(
