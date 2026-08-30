@@ -13,6 +13,7 @@ import feedparser
 import streamlit as st
 from openai import OpenAI
 from bs4 import BeautifulSoup
+import base64
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -449,6 +450,261 @@ def upload_image_to_github(image_path, filename):
     )
 
     return raw_url
+    
+# =========================
+# AI 이미지 포함 카드뉴스 생성 기능
+# =========================
+
+FONT_PATH = "fonts/NanumGothic.ttf"
+
+def pick_value(d, keys, default=""):
+    for k in keys:
+        if k in d and d[k]:
+            return d[k]
+    return default
+
+def get_font(size):
+    try:
+        return ImageFont.truetype(FONT_PATH, size)
+    except:
+        return ImageFont.load_default()
+
+def wrap_text(draw, text, font, max_width):
+    text = str(text).strip()
+    if not text:
+        return []
+
+    paragraphs = text.split("\n")
+    lines = []
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            lines.append("")
+            continue
+
+        current = ""
+        for ch in para:
+            test = current + ch
+            bbox = draw.textbbox((0, 0), test, font=font)
+            width = bbox[2] - bbox[0]
+            if width <= max_width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = ch
+        if current:
+            lines.append(current)
+
+    return lines
+
+def draw_wrapped_text(draw, text, font, x, y, max_width, line_gap=12, max_lines=None, fill=(30, 41, 59)):
+    lines = wrap_text(draw, text, font, max_width)
+
+    if max_lines and len(lines) > max_lines:
+        lines = lines[:max_lines]
+        if lines:
+            if len(lines[-1]) >= 2:
+                lines[-1] = lines[-1][:-1] + "…"
+            else:
+                lines[-1] = lines[-1] + "…"
+
+    current_y = y
+    for line in lines:
+        draw.text((x, current_y), line, font=font, fill=fill)
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_height = bbox[3] - bbox[1]
+        current_y += line_height + line_gap
+
+    return current_y
+
+def generate_ai_visual(client, article_title, slide_title, slide_body):
+    if client is None:
+        return None
+
+    prompt = f"""
+Create a polished editorial illustration for an Instagram card-news slide.
+
+Topic: {article_title}
+Slide focus: {slide_title}
+Key message: {slide_body}
+
+Requirements:
+- Square 1:1 composition
+- Ocean science / marine environment theme
+- Clean, modern editorial illustration
+- Visually rich and attractive, not plain
+- Blue, teal, white dominant palette with a small coral accent
+- Suitable for Korean educational card news
+- No text, no letters, no numbers
+- No watermark
+- Should look professional and relevant to the topic
+"""
+
+    try:
+        result = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size="1024x1024"
+        )
+        image_b64 = result.data[0].b64_json
+        return base64.b64decode(image_b64)
+    except Exception as e:
+        st.warning(f"AI 이미지 생성 실패: {e}")
+        return None
+
+def create_card_slide(title, body, slide_no, total_slides, image_bytes=None):
+    width, height = 1080, 1080
+    card = Image.new("RGB", (width, height), (245, 250, 252))
+    draw = ImageDraw.Draw(card)
+
+    # 바깥 카드 배경
+    draw.rounded_rectangle((30, 30, 1050, 1050), radius=36, fill=(255, 255, 255))
+
+    # 상단 라벨
+    label_font = get_font(28)
+    title_font = get_font(58)
+    body_font = get_font(38)
+    small_font = get_font(24)
+
+    draw.text((70, 60), "OCEAN SCIENCE BRIEF", font=label_font, fill=(14, 116, 144))
+
+    # 이미지 영역
+    image_box = (70, 110, 1010, 560)
+
+    if image_bytes:
+        try:
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            img = ImageOps.fit(img, (image_box[2] - image_box[0], image_box[3] - image_box[1]))
+            card.paste(img, (image_box[0], image_box[1]))
+        except:
+            draw.rounded_rectangle(image_box, radius=28, fill=(207, 234, 245))
+    else:
+        draw.rounded_rectangle(image_box, radius=28, fill=(207, 234, 245))
+        draw.ellipse((120, 180, 250, 310), fill=(125, 211, 252))
+        draw.ellipse((210, 240, 360, 390), fill=(103, 232, 249))
+        draw.ellipse((760, 180, 940, 360), fill=(165, 243, 252))
+        draw.arc((110, 350, 950, 700), 0, 180, fill=(14, 165, 233), width=8)
+
+    # 제목
+    title_y = 610
+    title_max_width = 940
+    title_lines = wrap_text(draw, title, title_font, title_max_width)
+    if len(title_lines) > 2:
+        title_lines = title_lines[:2]
+        title_lines[-1] = title_lines[-1][:-1] + "…"
+
+    current_y = title_y
+    for line in title_lines:
+        draw.text((70, current_y), line, font=title_font, fill=(15, 23, 42))
+        bbox = draw.textbbox((0, 0), line, font=title_font)
+        current_y += (bbox[3] - bbox[1]) + 10
+
+    # 본문
+    body_y = current_y + 20
+    draw_wrapped_text(
+        draw=draw,
+        text=body,
+        font=body_font,
+        x=70,
+        y=body_y,
+        max_width=940,
+        line_gap=10,
+        max_lines=7,
+        fill=(51, 65, 85)
+    )
+
+    # 하단 구분선
+    draw.line((70, 980, 1010, 980), fill=(226, 232, 240), width=2)
+
+    # 페이지 번호
+    footer_text = f"{slide_no} / {total_slides}"
+    footer_bbox = draw.textbbox((0, 0), footer_text, font=small_font)
+    footer_w = footer_bbox[2] - footer_bbox[0]
+    draw.text((1010 - footer_w, 995), footer_text, font=small_font, fill=(100, 116, 139))
+
+    return card
+
+def build_slide_contents(article, analysis):
+    article_title = article.get("title", "해양 환경 기사")
+    summary = pick_value(analysis, ["summary", "핵심 요약", "core_summary"], "")
+    importance = pick_value(analysis, ["importance", "왜 중요한가"], "")
+    ecosystem = pick_value(analysis, ["ecosystem", "해양생태계와의 연결"], "")
+    solution = pick_value(analysis, ["solution", "해결 방향"], "")
+    caption = pick_value(analysis, ["caption", "인스타그램 캡션"], "")
+
+    caption_clean = caption.split("#")[0].strip() if caption else ""
+    if not caption_clean:
+        caption_clean = "바다의 변화를 이해하고 해양환경 보호 실천에 함께 참여해 봅시다."
+
+    slides = [
+        {
+            "title": article_title,
+            "body": summary if summary else "기사의 핵심 내용을 요약한 카드입니다."
+        },
+        {
+            "title": "왜 중요한가",
+            "body": importance if importance else "이 내용이 왜 중요한지 설명합니다."
+        },
+        {
+            "title": "해양생태계와의 연결",
+            "body": ecosystem if ecosystem else "해양생태계에 미치는 영향을 정리합니다."
+        },
+        {
+            "title": "해결 방향",
+            "body": solution if solution else "문제 해결을 위한 방향을 제시합니다."
+        },
+        {
+            "title": "함께 생각해 보기",
+            "body": caption_clean
+        }
+    ]
+    return slides
+
+def create_cardnews_with_ai(article, analysis, client, use_ai_images=True, image_mode="표지만"):
+    slides = build_slide_contents(article, analysis)
+
+    temp_dir = tempfile.mkdtemp()
+    image_paths = []
+
+    for idx, slide in enumerate(slides, start=1):
+        should_generate_image = False
+
+        if use_ai_images:
+            if image_mode == "모든 슬라이드":
+                should_generate_image = True
+            elif image_mode == "표지만" and idx == 1:
+                should_generate_image = True
+
+        image_bytes = None
+        if should_generate_image:
+            image_bytes = generate_ai_visual(
+                client=client,
+                article_title=article.get("title", "해양 환경 기사"),
+                slide_title=slide["title"],
+                slide_body=slide["body"]
+            )
+
+        card_img = create_card_slide(
+            title=slide["title"],
+            body=slide["body"],
+            slide_no=idx,
+            total_slides=len(slides),
+            image_bytes=image_bytes
+        )
+
+        out_path = os.path.join(temp_dir, f"slide_{idx}.png")
+        card_img.save(out_path)
+        image_paths.append(out_path)
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in image_paths:
+            zf.write(path, arcname=os.path.basename(path))
+
+    zip_buffer.seek(0)
+    return image_paths, zip_buffer.getvalue()
 
 if "articles" not in st.session_state:
     st.session_state["articles"] = []
@@ -481,6 +737,18 @@ with st.sidebar:
         2,
         10,
         5
+    )
+    st.markdown("### 카드뉴스 옵션")
+
+    use_ai_images = st.checkbox(
+        "AI 이미지 포함",
+        value=True
+    )
+
+    image_mode = st.selectbox(
+        "이미지 생성 범위",
+        ["표지만", "모든 슬라이드"],
+        index=0
     )
 
     if get_api_key():
@@ -664,15 +932,19 @@ else:
                 ):
 
                     with st.spinner(
-                        "카드뉴스 이미지를 만드는 중입니다..."
+                        "AI 이미지와 카드뉴스를 생성하는 중입니다..."
                     ):
 
                         try:
 
-                            paths, zip_data = (
-                                create_cardnews(
-                                    result
-                                )
+                            client = get_client()
+
+                            paths, zip_data = create_cardnews_with_ai(
+                                article=article,
+                                analysis=result,
+                                client=client,
+                                use_ai_images=use_ai_images,
+                                image_mode=image_mode
                             )
 
                             st.session_state[
@@ -684,7 +956,7 @@ else:
                             }
 
                             st.success(
-                                "카드뉴스 생성 완료"
+                                "AI 카드뉴스 생성 완료"
                             )
 
                         except Exception as error:
