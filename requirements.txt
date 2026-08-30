@@ -1,4 +1,6 @@
-streamlit>=1.40
-feedparser>=6.0
-beautifulsoup4>=4.12
-openai>=1.0
+streamlit
+openai>=1.40.0
+feedparser
+requests
+pillow
+beautifulsoup4
